@@ -14,17 +14,26 @@ import java.util.List;
 
 @Entity
 @Table(name = "empresas")
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 @Builder
 public class Empresa implements UserDetails {
 
     public enum EmpresaRole {
         ADMIN("admin"),
         USER("user");
+
         private String role;
-        EmpresaRole(String role) { this.role = role; }
-        public String getRole() { return role; }
+
+        EmpresaRole(String role) {
+            this.role = role;
+        }
+
+        public String getRole() {
+            return role;
+        }
     }
 
     @Id
@@ -70,10 +79,33 @@ public class Empresa implements UserDetails {
         return List.of(new SimpleGrantedAuthority("ROLE_USER"));
     }
 
-    @Override public String getPassword() { return senha; }
-    @Override public String getUsername() { return cnpj; }
-    @Override public boolean isAccountNonExpired() { return true; }
-    @Override public boolean isAccountNonLocked() { return true; }
-    @Override public boolean isCredentialsNonExpired() { return true; }
-    @Override public boolean isEnabled() { return true; }
+    @Override
+    public String getPassword() {
+        return senha;
+    }
+
+    @Override
+    public String getUsername() {
+        return cnpj;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
 }
