@@ -1,5 +1,9 @@
 package com.senai.sgp_backend.controllers;
 
+import com.senai.sgp_backend.dto.WebhookFormsDTO;
+import com.senai.sgp_backend.models.Empresa;
+import com.senai.sgp_backend.repositories.EmpresaRepository;
+import java.time.LocalDate;
 import com.senai.sgp_backend.dto.SolicitacaoResponseDTO;
 import com.senai.sgp_backend.models.Solicitacao;
 import com.senai.sgp_backend.services.SolicitacaoService;
@@ -20,6 +24,9 @@ public class SolicitacaoController {
 
     @Autowired
     private SolicitacaoService solicitacaoService;
+
+    @Autowired
+    private EmpresaRepository empresaRepository;
 
     @PostMapping
     public ResponseEntity<?> criar(@RequestBody @Valid Solicitacao solicitacao) {
@@ -110,5 +117,45 @@ public class SolicitacaoController {
                 quantidadeParticipantes);
 
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/webhook")
+    public ResponseEntity<?> receberWebhookForms(@RequestBody WebhookFormsDTO payload) {
+        try {
+            // 1. Busca a empresa no banco de dados local usando o CNPJ preenchido no Forms
+            Empresa empresa = empresaRepository.findByCnpj(payload.cnpjEmpresa())
+                    .orElseThrow(() -> new RuntimeException("Atenção: A empresa com CNPJ " + payload.cnpjEmpresa()
+                            + " não está cadastrada no sistema."));
+
+            // 2. Monta a nova Solicitação com os dados que vieram da nuvem
+            Solicitacao novaSolicitacao = new Solicitacao();
+            novaSolicitacao.setTreinamento(payload.titulo());
+            novaSolicitacao.setTreinamentoOutros(payload.descricao());
+
+            // Converte a data que vem como texto (YYYY-MM-DD) para LocalDate
+            if (payload.dataSugerida() != null && !payload.dataSugerida().trim().isEmpty()) {
+                novaSolicitacao.setDataSugerida(LocalDate.parse(payload.dataSugerida()));
+            }
+
+            novaSolicitacao.setListaParticipantes(payload.listaParticipantes());
+
+            // Calcula a quantidade de participantes (obrigatório no banco)
+            if (payload.listaParticipantes() != null) {
+                int totalParticipantes = (int) java.util.Arrays.stream(payload.listaParticipantes().split("\\R"))
+                        .filter(nome -> !nome.trim().isEmpty())
+                        .count();
+                novaSolicitacao.setQuantidadeParticipantes(totalParticipantes);
+            } else {
+                novaSolicitacao.setQuantidadeParticipantes(0);
+            }
+
+            novaSolicitacao.setEmpresa(empresa);
+
+            // 3. Salva a demanda
+            return ResponseEntity.ok(solicitacaoService.criarSolicitacao(novaSolicitacao));
+
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Erro ao processar formulário: " + e.getMessage());
+        }
     }
 }
