@@ -1,47 +1,71 @@
 package com.senai.sgp_backend.services;
 
+import com.senai.sgp_backend.dto.EmpresaResponseDTO;
+import com.senai.sgp_backend.models.Empresa;
+import com.senai.sgp_backend.repositories.EmpresaRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import com.senai.sgp_backend.dto.EmpresaResponseDTO;
-import com.senai.sgp_backend.exceptions.CnpjJaCadastradoException;
-import com.senai.sgp_backend.models.Empresa;
-import com.senai.sgp_backend.repositories.EmpresaRepository;
-
-import jakarta.transaction.Transactional;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Optional;
+import java.util.stream.Collectors; // IMPORTANTE: Faltava este import
 
 @Service
 public class EmpresaService {
+
     @Autowired
-    private EmpresaRepository repository;
-    
+    private EmpresaRepository empresaRepository;
+
     @Autowired
     private PasswordEncoder passwordEncoder;
 
-    @Transactional
+    @Transactional // Adicionado para garantir a transação
     public EmpresaResponseDTO salvarEmpresa(Empresa empresa) {
-        // Limpa o CNPJ para garantir a comparação correta
-        String cnpjLimpo = empresa.getCnpj().replaceAll("[^0-9]", "");
-
-        // Validação de duplicidade usando a exceção customizada
-        if (repository.findByCnpj(cnpjLimpo).isPresent()) {
-            throw new CnpjJaCadastradoException("Este CNPJ já está cadastrado no sistema.");
+        // 1. Limpa o CNPJ (Garante 14 dígitos conforme sua @Pattern)
+        if (empresa.getCnpj() != null) {
+            empresa.setCnpj(empresa.getCnpj().replaceAll("\\D", ""));
         }
 
-        empresa.setCnpj(cnpjLimpo);
-        empresa.setSenha(passwordEncoder.encode(empresa.getSenha()));
+        // 2. Encripta a senha (Garante segurança e @Size min 6)
+        if (empresa.getSenha() != null && !empresa.getSenha().startsWith("$2a$")) {
+            empresa.setSenha(passwordEncoder.encode(empresa.getSenha()));
+        }
 
-        Empresa salva = repository.save(empresa);
+        // 3. Define o Role padrão usando o Enum interno da classe Empresa
+        if (empresa.getRole() == null) {
+            empresa.setRole(Empresa.EmpresaRole.USER);
+        }
+
+        // 4. Salva no banco e converte para DTO
+        Empresa salva = empresaRepository.save(empresa);
         return EmpresaResponseDTO.fromEntity(salva);
     }
 
-    // Método para evitar erros de compilação no Controller
+    @Transactional(readOnly = true)
+    public Optional<Empresa> buscarPorCnpj(String cnpj) {
+        String cnpjLimpo = cnpj.replaceAll("\\D", "");
+        return empresaRepository.findByCnpj(cnpjLimpo);
+    }
+
+    @Transactional(readOnly = true)
     public List<EmpresaResponseDTO> listarTodas() {
-        return repository.findAll().stream()
+        // Busca todas e mapeia cada uma para o DTO (Resolve o Type Mismatch do Controller)
+        return empresaRepository.findAll().stream()
                 .map(EmpresaResponseDTO::fromEntity)
                 .collect(Collectors.toList());
+    } // Chave de fechamento que estava faltando
+
+    @Transactional(readOnly = true)
+    public Empresa buscarPorId(Long id) {
+        return empresaRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Empresa não encontrada com o ID: " + id));
+    }
+
+    @Transactional
+    public void deletar(Long id) {
+        Empresa empresa = buscarPorId(id);
+        empresaRepository.delete(empresa);
     }
 }

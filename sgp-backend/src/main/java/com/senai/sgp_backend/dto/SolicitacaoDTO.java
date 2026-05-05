@@ -11,5 +11,5 @@ public record SolicitacaoDTO(
     @NotNull(message = "A data é obrigatória") LocalDate data,
     @NotBlank(message = "O status é obrigatório") String status,
     @NotNull(message = "ID da empresa é obrigatório") Long empresaId,
-    Long usuarioId // Opcional no início
+    Long usuarioId 
 ) {}

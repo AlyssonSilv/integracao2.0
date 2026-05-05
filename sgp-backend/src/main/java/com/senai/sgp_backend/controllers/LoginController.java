@@ -33,6 +33,12 @@ public class LoginController {
 
     @PostMapping
     public ResponseEntity<LoginResponseDTO> login(@RequestBody LoginRequestDTO data) {
+
+        // --- RAIO-X PARA DEBUG ---
+        System.out.println("=== TENTATIVA DE LOGIN ===");
+        System.out.println("CNPJ recebido: [" + data.cnpj() + "]");
+        System.out.println("Nome recebido: [" + data.nomeResponsavel() + "]");
+        System.out.println("==========================");
         // Busca pela combinação exata de CNPJ e Nome do Responsável
         return empresaRepository.findByCnpjAndNomeResponsavelIgnoreCase(data.cnpj(), data.nomeResponsavel())
                 .map(empresa -> {

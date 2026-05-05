@@ -1,9 +1,16 @@
 package com.senai.sgp_backend.services;
 
 import com.senai.sgp_backend.dto.SolicitacaoResponseDTO;
+import com.senai.sgp_backend.dto.WebhookFormsDTO;
+import com.senai.sgp_backend.models.Empresa;
 import com.senai.sgp_backend.models.Solicitacao;
+import com.senai.sgp_backend.repositories.EmpresaRepository;
 import com.senai.sgp_backend.repositories.SolicitacaoRepository;
+
+import jakarta.validation.Valid;
+
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,22 +25,58 @@ public class SolicitacaoService {
     @Autowired
     private SolicitacaoRepository solicitacaoRepository;
 
+    @Autowired
+    private EmpresaRepository empresaRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
     @Transactional
-    public SolicitacaoResponseDTO criarSolicitacao(Solicitacao solicitacao) {
-        if (solicitacao.getProtocolo() == null || solicitacao.getProtocolo().isEmpty()) {
-            solicitacao.setProtocolo("CTE-" + System.currentTimeMillis());
+    public SolicitacaoResponseDTO processarWebhook(WebhookFormsDTO payload) {
+
+        // 1. LIMPEZA IMEDIATA: Garante que o CNPJ tenha apenas 14 números
+        // Isso resolve o erro "O CNPJ deve conter exatamente 14 dígitos numéricos"
+        String cnpjLimpo = payload.cnpjDaEmpresa().replaceAll("\\D", "");
+
+        // 2. BUSCA OU CRIA AUTOMATICAMENTE
+        Empresa empresa = empresaRepository.findByCnpj(cnpjLimpo)
+                .orElseGet(() -> {
+                    Empresa nova = new Empresa();
+                    nova.setCnpj(cnpjLimpo);
+                    nova.setRazaoSocial(payload.nomeDaEmpresa());
+                    nova.setNomeResponsavel(payload.NomeDoResponsavel());
+                    nova.setTelefone(payload.telefoneEmpresa());
+
+                    // SATISFAZ O BANCO: Preenche e-mail e senha sem exigir login do usuário
+                    // Resolve "O e-mail é obrigatório" e "A senha é obrigatória"
+                    nova.setEmail(payload.emailDeContato());
+                    nova.setSenha(passwordEncoder.encode("SENAI@2026"));
+
+                    // Usa o Enum interno da sua classe Empresa para evitar erro de import
+                    nova.setRole(Empresa.EmpresaRole.USER);
+
+                    return empresaRepository.save(nova);
+                });
+
+        // 3. VINCULA A SOLICITAÇÃO
+        Solicitacao solicitacao = new Solicitacao();
+        solicitacao.setEmpresa(empresa);
+        solicitacao.setTreinamento(payload.treinamento());
+        solicitacao.setListaParticipantes(payload.listaParticipantes());
+        solicitacao.setDescricao(payload.descricao());
+
+        if (payload.dataSugerida() != null && !payload.dataSugerida().isEmpty()) {
+            solicitacao.setDataSugerida(LocalDate.parse(payload.dataSugerida()));
         }
 
         solicitacao.setStatus("Nova");
+        solicitacao.setProtocolo("CTE-" + System.currentTimeMillis());
 
-        // Lógica para contagem exata de participantes baseada na lista de nomes ao
-        // criar
-        if (solicitacao.getListaParticipantes() != null) {
-            int totalReal = (int) Arrays.stream(solicitacao.getListaParticipantes().split("\\R"))
+        // 4. CÁLCULO DE PARTICIPANTES
+        if (payload.listaParticipantes() != null) {
+            int totalReal = (int) Arrays.stream(payload.listaParticipantes().split("\\R"))
                     .filter(nome -> !nome.trim().isEmpty())
                     .count();
-
-            // Define a quantidade exata baseada nos nomes encontrados
             solicitacao.setQuantidadeParticipantes(totalReal);
         }
 
@@ -66,26 +109,20 @@ public class SolicitacaoService {
         return stats;
     }
 
-    @Transactional // Garante que a alteração seja salva corretamente no banco
+    @Transactional
     public void atualizarStatus(Long id, String novoStatus, String instrutor, String sala, String horario) {
-        // 1. Busca a solicitação pelo ID ou lança um erro se não existir
         Solicitacao solicitacao = solicitacaoRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Solicitação não encontrada com o ID: " + id));
 
-        // 2. Atualiza o campo status
         solicitacao.setStatus(novoStatus);
 
-        // 3. Se o status for aprovado pelo CTA-SENAI, salva os dados físicos
         if ("CONFIRMADO".equals(novoStatus)) {
             solicitacao.setInstrutor(instrutor);
             solicitacao.setSala(sala);
             solicitacao.setHorario(horario);
         }
 
-        // 4. Salva a alteração
         solicitacaoRepository.save(solicitacao);
-
-        System.out.println("Status da solicitação " + id + " alterado para: " + novoStatus);
     }
 
     public void confirmarSolicitacao(Long id) throws Exception {
@@ -103,7 +140,7 @@ public class SolicitacaoService {
         solicitacaoRepository.save(solicitacao);
     }
 
-    // ATUALIZADO: Recebe também a quantidadeParticipantes enviada pelo Controller
+    @Transactional
     public void editarAgendamento(Long id, String status, String instrutor, String sala, String horario,
             LocalDate dataSugerida, String listaParticipantes, Integer quantidadeParticipantes) {
 
@@ -118,7 +155,6 @@ public class SolicitacaoService {
 
         if (listaParticipantes != null) {
             solicitacao.setListaParticipantes(listaParticipantes);
-            // Salva a quantidade enviada pelo React
             solicitacao.setQuantidadeParticipantes(quantidadeParticipantes != null ? quantidadeParticipantes : 0);
         }
 
@@ -130,5 +166,10 @@ public class SolicitacaoService {
                 .orElseThrow(() -> new RuntimeException("Solicitação não encontrada"));
 
         return SolicitacaoResponseDTO.fromEntity(solicitacao);
+    }
+
+    public Object criarSolicitacao(Solicitacao solicitacao) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'criarSolicitacao'");
     }
 }

@@ -24,7 +24,6 @@ public class Solicitacao {
     @Column(nullable = false)
     private Integer quantidadeParticipantes;
 
-    // columnDefinition = "TEXT" permite textos longos com quebra de linha
     @Column(columnDefinition = "TEXT", nullable = false)
     private String listaParticipantes;
 
@@ -32,15 +31,17 @@ public class Solicitacao {
     private LocalDate dataSugerida;
 
     @Column(nullable = false)
-    private String status; // Ex: "Nova", "Agendada", "Em Triagem"
+    private String status; 
 
-    // --- NOVOS CAMPOS PARA A AGENDA DO CTA ---
+    // --- CAMPO ADICIONADO PARA CORREÇÃO ---
+    @Column(columnDefinition = "TEXT")
+    private String descricao;
+    // ---------------------------------------
+
     private String instrutor;
     private String sala;
     private String horario;
-    // -----------------------------------------
 
-    // Relacionamento: A solicitação pertence a uma Empresa (FAT)
     @ManyToOne
     @JoinColumn(name = "empresa_id", nullable = false)
     private Empresa empresa;

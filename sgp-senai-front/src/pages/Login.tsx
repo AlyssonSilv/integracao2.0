@@ -4,7 +4,7 @@ import api from '../services/api';
 
 const Login: React.FC = () => {
   const [cnpj, setCnpj] = useState('');
-  const [nomeResponsavel, setNomeResponsavel] = useState(''); 
+  const [nomeResponsavel, setNomeResponsavel] = useState('');
   const [erro, setErro] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -23,13 +23,14 @@ const Login: React.FC = () => {
       });
 
       const { token, refreshToken, id, razaoSocial, email, role } = response.data;
+      console.log("O papel (role) que chegou do backend é:", role); // <- Adicione isto
 
       localStorage.setItem('token', token);
       localStorage.setItem('refreshToken', refreshToken);
 
       localStorage.setItem('empresa_logada', JSON.stringify({
         id,
-        razaoSocial, 
+        razaoSocial,
         cnpj: cnpjLimpo,
         email,
         role
