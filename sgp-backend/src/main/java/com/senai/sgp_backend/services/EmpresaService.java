@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors; // IMPORTANTE: Faltava este import
+import java.util.stream.Collectors; 
 
 @Service
 public class EmpresaService {
@@ -51,11 +51,11 @@ public class EmpresaService {
 
     @Transactional(readOnly = true)
     public List<EmpresaResponseDTO> listarTodas() {
-        // Busca todas e mapeia cada uma para o DTO (Resolve o Type Mismatch do Controller)
+        // Busca todas e mapeia cada uma para o DTO 
         return empresaRepository.findAll().stream()
                 .map(EmpresaResponseDTO::fromEntity)
                 .collect(Collectors.toList());
-    } // Chave de fechamento que estava faltando
+    } 
 
     @Transactional(readOnly = true)
     public Empresa buscarPorId(Long id) {
