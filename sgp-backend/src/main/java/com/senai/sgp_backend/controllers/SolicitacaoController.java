@@ -22,9 +22,7 @@ public class SolicitacaoController {
     @Autowired
     private SolicitacaoService solicitacaoService;
 
-    // REMOVIDO: EmpresaRepository não deve mais ser injetado aqui, pois a lógica
-    // está no Service
-
+    // Rota para criação MANUAL (ex: React Frontend)
     @PostMapping
     public ResponseEntity<?> criar(@RequestBody @Valid Solicitacao solicitacao) {
         ZoneId fusoHorario = ZoneId.of("America/Fortaleza");
@@ -33,12 +31,35 @@ public class SolicitacaoController {
 
         if (agora.isAfter(limite)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body("A agenda do dia foi encerrada. O horário limite para envio de solicitações é até as 16:30.");
+                    .body("A agenda do dia foi encerrada. O horário limite para envio de solicitações é até as 16:30. Por favor, retorne amanhã.");
         }
 
-        // Chame buscarPorId ou criarSolicitacao se ainda existir no service para o
-        // formulário manual do React
         return ResponseEntity.ok(solicitacaoService.criarSolicitacao(solicitacao));
+    }
+
+    // ==========================================
+    // ROTA DO WEBHOOK (Power Automate)
+    // ==========================================
+    @PostMapping("/webhook")
+    public ResponseEntity<?> receberWebhookForms(
+            @RequestHeader(value = "X-Auth-Secret", required = false) String secret,
+            @RequestBody WebhookFormsDTO payload) {
+
+        String minhaSenhaSecreta = "Senai2026@Maranhao!";
+        if (!minhaSenhaSecreta.equals(secret)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body("Acesso negado: Segredo de autenticação inválido.");
+        }
+
+        try {
+            // Delega TUDO para o Service. Sem lógica de banco de dados no Controller.
+            SolicitacaoResponseDTO response = solicitacaoService.processarWebhook(payload);
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            e.printStackTrace(); // Imprime o erro real no console para ajudar no debug
+            return ResponseEntity.badRequest().body("Erro ao processar formulário: " + e.getMessage());
+        }
     }
 
     @GetMapping("/{id}")
@@ -84,45 +105,19 @@ public class SolicitacaoController {
         String sala = body.get("sala");
         String horario = body.get("horario");
         String listaParticipantes = body.get("listaParticipantes");
+
         Integer quantidadeParticipantes = body.get("quantidadeParticipantes") != null
-                ? Integer.parseInt(body.get("quantidadeParticipantes"))
+                ? Integer.parseInt(body.get("quantidadeParticipantes").toString())
                 : 0;
 
+        String dataStr = body.get("dataSugerida");
         java.time.LocalDate dataSugerida = null;
-        if (body.get("dataSugerida") != null && !body.get("dataSugerida").trim().isEmpty()) {
-            dataSugerida = java.time.LocalDate.parse(body.get("dataSugerida"));
+        if (dataStr != null && !dataStr.trim().isEmpty()) {
+            dataSugerida = java.time.LocalDate.parse(dataStr);
         }
 
         solicitacaoService.editarAgendamento(id, status, instrutor, sala, horario, dataSugerida, listaParticipantes,
                 quantidadeParticipantes);
         return ResponseEntity.ok().build();
-    }
-
-    /**
-     * MÉTODO DO WEBHOOK COMPLETAMENTE CORRIGIDO:
-     * Agora ele apenas repassa o payload para o Service, que faz o trabalho pesado.
-     */
-    @PostMapping("/webhook")
-    public ResponseEntity<?> receberWebhookForms(
-            @RequestHeader(value = "X-Auth-Secret", required = false) String secret,
-            @RequestBody WebhookFormsDTO payload) {
-
-        // 1. Validação do Segredo
-        String minhaSenhaSecreta = "Senai2026@Maranhao!";
-        if (!minhaSenhaSecreta.equals(secret)) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("Acesso negado: Segredo de autenticação inválido.");
-        }
-
-        try {
-            // 2. Chame o novo método que criamos no Service
-            // Ele resolve a criação da empresa, senha, e-mail e limpeza de CNPJ
-            SolicitacaoResponseDTO response = solicitacaoService.processarWebhook(payload);
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            // Se houver erro de validação (ex: CNPJ inválido), retorna 400
-            return ResponseEntity.badRequest().body("Erro ao processar formulário: " + e.getMessage());
-        }
     }
 }

@@ -6,9 +6,6 @@ import com.senai.sgp_backend.models.Empresa;
 import com.senai.sgp_backend.models.Solicitacao;
 import com.senai.sgp_backend.repositories.EmpresaRepository;
 import com.senai.sgp_backend.repositories.SolicitacaoRepository;
-
-import jakarta.validation.Valid;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -31,14 +28,32 @@ public class SolicitacaoService {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    /**
+     * PROCESSAMENTO DO WEBHOOK (Forms -> Power Automate -> API)
+     * Higieniza dados e evita erros 400 de ConstraintViolation.
+     */
     @Transactional
     public SolicitacaoResponseDTO processarWebhook(WebhookFormsDTO payload) {
 
-        // 1. LIMPEZA IMEDIATA: Garante que o CNPJ tenha apenas 14 números
-        // Isso resolve o erro "O CNPJ deve conter exatamente 14 dígitos numéricos"
-        String cnpjLimpo = payload.cnpjDaEmpresa().replaceAll("\\D", "");
+        // --- MODO DETETIVE (RAIO-X) LIGADO ---
+        System.out.println("=====================================================");
+        System.out.println(">>> 1. PAYLOAD COMPLETO CHEGOU DO AUTOMATE: " + payload);
+        System.out.println(">>> 2. CNPJ EXTRAÍDO DO JSON: '" + payload.cnpjDaEmpresa() + "'");
+        System.out.println("=====================================================");
 
-        // 2. BUSCA OU CRIA AUTOMATICAMENTE
+        // 1. Limpeza garantida do CNPJ
+        String cnpjOriginal = payload.cnpjDaEmpresa();
+        String cnpjLimpo = cnpjOriginal != null ? cnpjOriginal.replaceAll("\\D", "") : "";
+
+        // --- TRAVA DE SEGURANÇA E DEBUG ---
+        if (cnpjLimpo.length() != 14) {
+            throw new RuntimeException(
+                    "ERRO DE DADOS DO FORMS: O CNPJ enviado não tem 14 números! " +
+                            "O que chegou do Automate foi: '" + cnpjOriginal + "'. " +
+                            "Após limpar, ficou com " + cnpjLimpo.length() + " números (" + cnpjLimpo + ").");
+        }
+
+        // 2. Busca ou Cria a Empresa com dados higienizados
         Empresa empresa = empresaRepository.findByCnpj(cnpjLimpo)
                 .orElseGet(() -> {
                     Empresa nova = new Empresa();
@@ -47,34 +62,60 @@ public class SolicitacaoService {
                     nova.setNomeResponsavel(payload.NomeDoResponsavel());
                     nova.setTelefone(payload.telefoneEmpresa());
 
-                    // SATISFAZ O BANCO: Preenche e-mail e senha sem exigir login do usuário
-                    // Resolve "O e-mail é obrigatório" e "A senha é obrigatória"
-                    nova.setEmail(payload.emailDeContato());
-                    nova.setSenha(passwordEncoder.encode("SENAI@2026"));
+                    // Tratamento de E-mail: Se vier vazio ou inválido, cria um padrão
+                    String emailEnviado = payload.emailDeContato();
+                    if (emailEnviado == null || !emailEnviado.contains("@")) {
+                        nova.setEmail("contato_" + cnpjLimpo + "@senai.com.br");
+                    } else {
+                        nova.setEmail(emailEnviado);
+                    }
 
-                    // Usa o Enum interno da sua classe Empresa para evitar erro de import
-                    nova.setRole(Empresa.EmpresaRole.USER);
+                    nova.setSenha(passwordEncoder.encode("SENAI@2026"));
+                    nova.setRole(Empresa.EmpresaRole.USER); // Enum interno correto
 
                     return empresaRepository.save(nova);
                 });
 
-        // 3. VINCULA A SOLICITAÇÃO
+        // 3. Cria e vincula a nova Solicitação
         Solicitacao solicitacao = new Solicitacao();
         solicitacao.setEmpresa(empresa);
         solicitacao.setTreinamento(payload.treinamento());
         solicitacao.setListaParticipantes(payload.listaParticipantes());
         solicitacao.setDescricao(payload.descricao());
 
-        if (payload.dataSugerida() != null && !payload.dataSugerida().isEmpty()) {
+        if (payload.dataSugerida() != null && !payload.dataSugerida().trim().isEmpty()) {
             solicitacao.setDataSugerida(LocalDate.parse(payload.dataSugerida()));
         }
 
         solicitacao.setStatus("Nova");
         solicitacao.setProtocolo("CTE-" + System.currentTimeMillis());
 
-        // 4. CÁLCULO DE PARTICIPANTES
+        // 4. Calcula quantidade de participantes dinamicamente
         if (payload.listaParticipantes() != null) {
             int totalReal = (int) Arrays.stream(payload.listaParticipantes().split("\\R"))
+                    .filter(nome -> !nome.trim().isEmpty())
+                    .count();
+            solicitacao.setQuantidadeParticipantes(totalReal);
+        } else {
+            solicitacao.setQuantidadeParticipantes(0);
+        }
+
+        Solicitacao salva = solicitacaoRepository.save(solicitacao);
+        return SolicitacaoResponseDTO.fromEntity(salva);
+    }
+
+    /**
+     * CRIAÇÃO MANUAL (React -> API)
+     */
+    @Transactional
+    public SolicitacaoResponseDTO criarSolicitacao(Solicitacao solicitacao) {
+        if (solicitacao.getProtocolo() == null || solicitacao.getProtocolo().isEmpty()) {
+            solicitacao.setProtocolo("CTE-" + System.currentTimeMillis());
+        }
+        solicitacao.setStatus("Nova");
+
+        if (solicitacao.getListaParticipantes() != null) {
+            int totalReal = (int) Arrays.stream(solicitacao.getListaParticipantes().split("\\R"))
                     .filter(nome -> !nome.trim().isEmpty())
                     .count();
             solicitacao.setQuantidadeParticipantes(totalReal);
@@ -125,25 +166,9 @@ public class SolicitacaoService {
         solicitacaoRepository.save(solicitacao);
     }
 
-    public void confirmarSolicitacao(Long id) throws Exception {
-        Solicitacao solicitacao = solicitacaoRepository.findById(id)
-                .orElseThrow(() -> new Exception("Solicitação não encontrada"));
-
-        boolean dataOcupada = solicitacaoRepository.existsByDataSugeridaAndStatus(solicitacao.getDataSugerida(),
-                "CONFIRMADO");
-
-        if (dataOcupada) {
-            throw new Exception("A data sugerida já possui um agendamento confirmado na agenda.");
-        }
-
-        solicitacao.setStatus("CONFIRMADO");
-        solicitacaoRepository.save(solicitacao);
-    }
-
     @Transactional
     public void editarAgendamento(Long id, String status, String instrutor, String sala, String horario,
             LocalDate dataSugerida, String listaParticipantes, Integer quantidadeParticipantes) {
-
         Solicitacao solicitacao = solicitacaoRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Solicitação não encontrada"));
 
@@ -166,10 +191,5 @@ public class SolicitacaoService {
                 .orElseThrow(() -> new RuntimeException("Solicitação não encontrada"));
 
         return SolicitacaoResponseDTO.fromEntity(solicitacao);
-    }
-
-    public Object criarSolicitacao(Solicitacao solicitacao) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'criarSolicitacao'");
     }
 }
